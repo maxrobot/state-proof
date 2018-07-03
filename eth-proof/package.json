@@ -23,11 +23,12 @@
   },
   "scripts": {
     "test": "node_modules/.bin/mocha test/default",
+    "transaction-test": "node_modules/.bin/mocha test/transaction",
     "extended-test": "node_modules/.bin/mocha test"
   },
   "bin": {
     "ethproof": "./cli.js"
   },
-  "author": "zac mitton",
+  "author": "fmgrabner",
   "license": "ISC"
 }
