@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -27,42 +28,59 @@ type transaction struct {
 }
 
 var txString = "0xd0a72c0b6a703ad82853346c6b1ddaf75a9fc474100e4b9b301b42d8d88d9353"
-var blockHash = "0xdc69532823b281514c0eec2a809dfc6c690a6bbb3e9006df4914a5b69cbb637"
+var blockHash = "0xdc69532823b281514c0eec2a809dfc6c690a6bbb3e9006df4914a5b69cbb6371"
+var blockNumber = "2569550"
+
+var endpoint = "http://127.0.0.1:9999"
 
 func main() {
-	// Connect to the RPC Client
-	rpcClient, err := rpc.Dial("http://127.0.0.1:9999")
-	if err != nil {
-		log.Fatalf("could not create RPC client: %v", err)
-	}
-
 	txHash := common.HexToHash(txString)
 
-	getTransactionProof(rpcClient, txHash)
+	block := getBlockByTransaction(txHash)
+	fmt.Printf("BlockHash:\n%+v\nReceived Blockhash:\n%+v\n\n", blockHash, block.BlockHash)
 
 	// Connect to the EthClient
-	client, err := ethclient.Dial("http://127.0.0.1:9999")
+	client, err := ethclient.Dial(endpoint)
 	if err != nil {
 		log.Fatal("could not create RPC client: %v", err)
 	}
 
-	tx, isPending, err := client.TransactionByHash(context.Background(), txHash)
+	// _, _, err := client.TransactionByHash(context.Background(), txHash)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	blockNum := new(big.Int)
+	blockNum.SetString(block.BlockNumber[2:], 16)
+
+	// fmt.Println(block.BlockNumber[2:])
+	// fmt.Printf(blockNum)
+	fmt.Printf("BlockNumber:\n%v\nReceived BlockNumber:\n%v\n\n", blockNumber, blockNum)
+	newBlock, err := client.BlockByNumber(context.Background(), blockNum)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println(tx.Hash().Hex())     // 0x5d49fcaa394c97ec8a9c3e7bd9e8388d420fb050a52083ca52ff24b3b65bc9c2
-	fmt.Println(tx.Value().String()) // 10000000000000000 (in wei)
-	fmt.Println(isPending)           // false
+	for idx, tx := range newBlock.Transactions() {
+		fmt.Printf("Index:%v\t Transaction:%x\n", idx, tx)
+	}
+	// fmt.Printf("%+v\n", newBlock)
+	// fmt.Printf("%+x\n", newBlock.Transactions)
+
 }
 
-func getTransactionProof(client *rpc.Client, txHash common.Hash) {
-	var tx *transaction
-	err := client.Call(&tx, "eth_getTransactionByHash", txHash)
+func getBlockByTransaction(txHash common.Hash) (tx *transaction) {
+	// Connect to the RPC Client
+	client, err := rpc.Dial(endpoint)
+	if err != nil {
+		log.Fatalf("could not create RPC client: %v", err)
+	}
+
+	err = client.Call(&tx, "eth_getTransactionByHash", txHash)
 	if err != nil {
 		fmt.Println("can't get latest block:", err)
 		return
 	}
-	fmt.Printf("Block Hash: %v\n", tx.BlockHash)
 
+	return
 }
