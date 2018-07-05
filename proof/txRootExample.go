@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"math/big"
@@ -15,82 +15,76 @@ import (
 	"github.com/maxrobot/go-ethereum/crypto"
 )
 
+var expectedBlockHash = common.HexToHash("0xa68e48252380b056f5e1c1a738897b84148be4ffbcf0857effbaa086a8a99fbb")
+var expectedTx = common.HexToHash("0xd828cadfcc7694d314058404506fc10a4dadac72aba68c286b34137da4156630")
+
 func main() {
 	client, err := ethclient.Dial("https://mainnet.infura.io")
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	fmt.Println("we have a connection")
+	fmt.Println("Connected to: https://mainnet.infura.io")
 
 	// Select a specific block
 	num := "5904064"
 	blockNumber := new(big.Int)
 	blockNumber.SetString(num, 10)
 
+	// Fetch header of block num
 	header, err := client.HeaderByNumber(context.Background(), blockNumber)
 	if err != nil {
 		log.Fatal(err)
 	}
+	// assert.Equal(t, expectedBlockHash, header.Hash())
 
+	// Fetch block of block num
 	block, err := client.BlockByNumber(context.Background(), header.Number)
 	if err != nil {
 		log.Fatal(err)
 	}
+	// assert.Equal(t, expectedBlockHash, block.Hash())
 
 	// Select a transaction, index should be 49
-	transx := block.Transaction(common.HexToHash("0xd828cadfcc7694d314058404506fc10a4dadac72aba68c286b34137da4156630"))
-	var txIdx int
-	fmt.Printf("\nTransaction:\n% 0x", transx.Hash().Bytes())
+	transx := block.Transaction(expectedTx)
+	var txIdx []byte
+	var leaf []byte
+	// fmt.Printf("\nTransaction:\n% 0x", transx.Hash().Bytes())
 
-	// VERIFY TRANSACTION ROOT
-	trieObj, _ := trie.New(common.Hash{}, trie.NewDatabase(ethdb.NewMemDatabase())) // empty trie
+	// Generate the trie
+	trieObj := new(trie.Trie)
 	for idx, tx := range block.Transactions() {
-
 		rlpIdx, _ := rlp.EncodeToBytes(uint(idx))  // rlp encode index of transaction
 		rlpTransaction, _ := rlp.EncodeToBytes(tx) // rlp encode transaction
 
-		trieObj.Update(rlpIdx, rlpTransaction) // update trie with the rlp encode index and the rlp encoded transaction
-		root, err := trieObj.Commit(nil)       // commit to database (which in this case is stored in memory)
-		if err != nil {
-			log.Fatalf("commit error: %v", err)
-		}
+		trieObj.Update(rlpIdx, rlpTransaction)
 
 		txRlpHash := crypto.Keccak256Hash(rlpTransaction)
 
-		fmt.Printf("TxHash[%d]: \t% 0x\n\tHash(RLP(Tx)): \t% 0x\n\tTrieRoot: \t% 0x\n",
-			idx, tx.Hash().Bytes(), txRlpHash.Bytes(), root.Bytes())
+		fmt.Printf("TxHash[%d]: \t% 0x\n\tHash(RLP(Tx)): \t% 0x\n",
+			idx, tx.Hash().Bytes(), txRlpHash.Bytes())
 
-		// Find the index of the transaction above
+		// Get the information about the transaction I care about...
 		if transx == tx {
-			txIdx = idx
+			txIdx = rlpIdx
+			leaf = rlpTransaction
 		}
+
 	}
 
-	fmt.Printf("\n\nBlock number: %d \n\tBlock.TxHash:\t% 0x \n\tTrie.Root:\t% 0x\n",
-		block.Number, block.TxHash().Bytes(), trieObj.Root())
-
-	fmt.Printf("TxHash[%d]: \t% 0x\n", txIdx, transx.Hash().Bytes())
-
-	// Get proof of the transaction
-	key := transx.Hash().Bytes()
+	// Generate a proof
 	proof := ethdb.NewMemDatabase()
-	trieObj.Prove(key, 0, proof)
+	trieObj.Prove(txIdx, 0, proof)
+	if proof == nil {
+		fmt.Printf("prover: nil proof")
+	}
 
-	rootString := hex.EncodeToString(trieObj.Root())
-	root := common.HexToHash("0x" + rootString)
-	fmt.Printf("\n%x\n", trieObj.Root())
-	fmt.Printf("\n%x\n", root)
-
-	// Validate that the proof generates the same trie root
-	val, _, err := trie.VerifyProof(root, key, proof)
-	fmt.Println(val)
-	// fmt.Printf("Generated Trie Root:\n\t% 0x", val)
-	// if err != nil {
-	// 	t.Fatalf("prover %d: failed to verify proof for key %x: %v\nraw proof: %x", i, kv.k, err, proof)
-	// }
-	// if !bytes.Equal(val, kv.v) {
-	// 	t.Fatalf("prover %d: verified value mismatch for key %x: have %x, want %x", i, kv.k, val, kv.v)
-	// }
-
+	// Verify the proof
+	val, _, err := trie.VerifyProof(trieObj.Hash(), txIdx, proof)
+	if err != nil {
+		fmt.Printf("prover: failed to verify proof: %v\nraw proof: %x", err, proof)
+	}
+	if !bytes.Equal(val, leaf) {
+		fmt.Printf("prover: verified value mismatch: have %x, want 'k'", val)
+	}
+	fmt.Printf("\nVerified Value:\t%x\nExpected Leaf:\t%x\n", val, leaf)
 }
