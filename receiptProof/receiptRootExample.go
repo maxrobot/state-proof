@@ -9,10 +9,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
-	"github.com/maxrobot/go-ethereum/crypto"
+	"github.com/maxrobot/go-ethereum/ethdb"
+	"github.com/maxrobot/go-ethereum/rlp"
 )
 
 var expectedBlockHash = common.HexToHash("0xa68e48252380b056f5e1c1a738897b84148be4ffbcf0857effbaa086a8a99fbb")
@@ -53,25 +52,31 @@ func main() {
 	// Generate the trie
 	trieObj := new(trie.Trie)
 	for idx, tx := range block.Transactions() {
-		rlpIdx, _ := rlp.EncodeToBytes(uint(idx))  // rlp encode index of transaction
-		rlpTransaction, _ := rlp.EncodeToBytes(tx) // rlp encode transaction
+		receipt, _ := client.TransactionReceipt(context.Background(), tx.Hash())
+		rlpIdx, _ := rlp.EncodeToBytes(uint(idx))   // rlp encode index of transaction
+		rlpReceipt, _ := rlp.EncodeToBytes(receipt) // rlp encode receipt
 
-		trieObj.Update(rlpIdx, rlpTransaction)
+		trieObj.Update(rlpIdx, rlpReceipt)
 
-		txRlpHash := crypto.Keccak256Hash(rlpTransaction)
+		// txRlpHash := crypto.Keccak256Hash(rlpReceipt)
 
-		fmt.Printf("TxHash[%d]: \t% 0x\n\tHash(RLP(Tx)): \t% 0x\n",
-			idx, tx.Hash().Bytes(), txRlpHash.Bytes())
+		// fmt.Printf("TxHash[%d]: \t% 0x\n\tHash(RLP(Tx)): \t% 0x\n",
+		// 	idx, tx.Hash().Bytes(), txRlpHash.Bytes())
 
-		// Get the information about the transaction I care about...
+		// Get the information about the receipt I care about...
 		if transx == tx {
 			txIdx = rlpIdx
-			leaf = rlpTransaction
+			leaf = rlpReceipt
 		}
 
 	}
 
-	// Generate a proof
+	root := trieObj.Hash()
+	expectedRoot := block.ReceiptHash()
+
+	fmt.Printf("\nExpected Root:\t%x\nRecovered Root:\t%x\n", expectedRoot, root)
+
+	// Generate a merkle proof for a key
 	proof := ethdb.NewMemDatabase()
 	trieObj.Prove(txIdx, 0, proof)
 	if proof == nil {
@@ -79,7 +84,7 @@ func main() {
 	}
 
 	// Verify the proof
-	val, _, err := trie.VerifyProof(trieObj.Hash(), txIdx, proof)
+	val, _, err := trie.VerifyProof(root, txIdx, proof)
 	if err != nil {
 		fmt.Printf("prover: failed to verify proof: %v\nraw proof: %x", err, proof)
 	}
